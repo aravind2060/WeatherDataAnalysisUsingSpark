@@ -1,90 +1,60 @@
 import logging
-import shutil
-import os
 import argparse
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, to_date, lag, collect_list
+from pyspark.sql.functions import col, to_date, lag, collect_list, explode
 from pyspark.sql.window import Window
-from pyspark.sql.types import DateType
+from pyspark.sql.types import StructType, StructField, StringType, DateType
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-def create_spark_session(app_name, master_node_url):
-    """Create a SparkSession instance for running Spark operations."""
-    logging.info("Creating Spark session.")
-    return SparkSession.builder \
-        .appName(app_name) \
-        .master(master_node_url) \
-        .getOrCreate()
+def create_spark_session():
+    """Create a SparkSession."""
+    logging.info("Creating SparkSession")
+    return SparkSession.builder.appName("ElementGapAnalysis").getOrCreate()
 
-def load_data(spark, file_path,schema):
-    """Load data from a CSV file."""
-    df = spark.read.csv(file_path, header=False, schema=schema)
-    df = df.withColumn("date", to_date(col("date"), "yyyyMMdd"))
+def load_input_data(spark, input_path):
+    """Load the input data and define the schema."""
+    logging.info(f"Loading input data from {input_path}")
+    schema = StructType([
+        StructField("StationID", StringType(), True),
+        StructField("Date", StringType(), True),
+        StructField("ElementType", StringType(), True),
+        StructField("Value", StringType(), True),
+        StructField("StateName", StringType(), True),
+        StructField("LocationName", StringType(), True),
+        StructField("Country", StringType(), True)
+    ])
+
+    df = spark.read.csv(input_path, schema=schema, header=False)
+    df = df.withColumn("DateCol", to_date(col("Date"), "yyyyMMdd"))
     return df
 
-def remove_data_among_gaps(df, no_of_days=3):
-    """Process data to find and handle gaps in dates."""
-    # Define window partitioned by 'stationId' and 'elementType' and ordered by 'date'
-    window_spec = Window.partitionBy("stationId", "elementType").orderBy("date")
-    
-    # Add a column for the previous date in each group
-    df = df.withColumn("prev_date", lag("date", 1).over(window_spec))
-    
-    # Calculate the difference in days between consecutive dates
-    df = df.withColumn("days_diff", (col("date").cast("int") - col("prev_date").cast("int")) / 86400)
-    
-    # Filter rows where the gap is more than 3 days, assuming gaps are relevant
-    df = df.filter(col("days_diff") > no_of_days)
+def detect_gaps(df):
+    """Detect and process gaps greater than 3 days."""
+    logging.info("Detecting gaps in data")
+    window_spec = Window.partitionBy("StationID", "ElementType").orderBy("DateCol")
+    df = df.withColumn("PrevDate", lag("DateCol").over(window_spec))
+    df = df.withColumn("Gap", (col("DateCol").cast("long") - col("PrevDate").cast("long")) / 86400 > 3)
+    return df.filter(col("Gap") == False)
 
-    return df
+def save_output(df, output_path):
+    """Save the output data."""
+    logging.info(f"Saving output data to {output_path}")
+    df.write.csv(output_path, mode="overwrite", header=True)
 
-def save_output(df, output_path, output_file):
-    """Save the augmented data to the specified path as a single CSV file without quotes."""
-    full_path = os.path.join(output_path, output_file)
-    temp_path = os.path.join(output_path, "temp")
-    logging.info(f"Preparing to save output to: {full_path}")
-
-    if os.path.exists(temp_path):
-        shutil.rmtree(temp_path)
-
-    df.coalesce(1).write.option("quote", "").csv(temp_path, header=False)
-    part_files = [f for f in os.listdir(temp_path) if f.startswith('part')]
-    if part_files:
-        os.rename(os.path.join(temp_path, part_files[0]), full_path)
-
-    shutil.rmtree(temp_path)
-    logging.info(f"Output successfully saved to: {full_path}")
-
-def process_files(spark, input_dir, output_filepath):
-    """Process each file in the input directory and save it with the same name in the output directory."""
-    files = [f for f in os.listdir(input_dir) if f.endswith('.csv')]
-    for file in files:
-        logging.info(f"Processing file: {file}")
-        input_filepath = os.path.join(input_dir, file)
-        
-        data_schema = "StationID STRING, date STRING, ElementType STRING, Value STRING, StateName STRING, LocationName STRING,Country STRING"
-        
-        data_df = load_data(spark, input_filepath,data_schema)
-        
-        processed_data_df = remove_data_among_gaps(data_df,3)
-                
-        save_output(processed_data_df, output_filepath,file)
-
-def main(app_name,master_node_url,input_path, output_path):    
-    """Main function to orchestrate the loading, processing, and saving of data."""
-    
-    spark = create_spark_session(app_name, master_node_url)    
-    
-    process_files(spark, input_path, output_path)
+def main(input_path, output_path):
+    spark = create_spark_session()
+    df = load_input_data(spark, input_path)
+    gap_df = detect_gaps(df)
+    save_output(gap_df, output_path)
     spark.stop()
 
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process and analyze gaps in weather element data.")
-    parser.add_argument("--master_node_url", default="local[*]", help="URL of the master node.")
-    parser.add_argument("--app_name", default="Process and analyze gaps in weather element data.", help="Name of the Spark application.")
-    parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output3/", help="Input directory path.")
-    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output4/", help="Output directory path.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_path", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output3/", help="Input file path")
+    parser.add_argument("--output_path", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output4/", help="Output file path")
     args = parser.parse_args()
-    main(args.app_name,args.master_node_url,args.input_filepath, args.output_filepath)
+    main(args.input_path, args.output_path)
