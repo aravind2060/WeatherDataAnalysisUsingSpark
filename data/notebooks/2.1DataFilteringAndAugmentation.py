@@ -9,11 +9,13 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def create_spark_session():
+def create_spark_session(app_name, master_node_url):    
     """Create a SparkSession instance with the specified application name."""
-    spark = SparkSession.builder.appName("DataAugmentation").getOrCreate()
     logging.info("Spark session created successfully.")
-    return spark
+    return SparkSession.builder \
+        .appName(app_name) \
+        .master(master_node_url) \
+        .getOrCreate()
 
 def stopSparkSession(spark):
     """Stop the Spark session."""
@@ -103,13 +105,15 @@ def process_files(spark, input_dir, output_filepath, metadata_filepath):
 def main():
     """Main function to orchestrate the data processing using Spark."""
     args = parse_arguments()
-    spark = create_spark_session()
+    spark = create_spark_session(args.app_name, args.master_node_url)    
     process_files(spark, args.input_filepath, args.output_filepath, args.metadata_filepath)
     stopSparkSession(spark)
 
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Process weather data.")
+    parser.add_argument("--master_node_url", default="local[*]", help="URL of the master node.")
+    parser.add_argument("--app_name", default="DataFilteration And Augmentation", help="Name of the Spark application.")
     parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output1/", help="Input directory path.")
     parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output2/", help="Output directory path.")
     parser.add_argument("--metadata_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/input/metadatafiles/", help="Metadata file path.")

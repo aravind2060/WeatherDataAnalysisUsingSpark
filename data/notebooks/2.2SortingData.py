@@ -8,12 +8,13 @@ from pyspark.sql.functions import col
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def create_spark_session():
+def create_spark_session(app_name, master_node_url):
     """Create a SparkSession instance for running Spark operations."""
     logging.info("Creating Spark session.")
     return SparkSession.builder \
-                        .appName("DataSorting") \
-                        .getOrCreate()
+        .appName(app_name) \
+        .master(master_node_url) \
+        .getOrCreate()
 
 def load_data(spark, file_path,schema):
     """Load data from a CSV file into a DataFrame."""
@@ -59,16 +60,18 @@ def process_files(spark, input_dir, output_filepath):
         save_output(sorted_df, output_filepath,file)
         
 
-def main(input_path, output_path):
+def main(app_name,master_node_url,input_path, output_path):
     """Main function to orchestrate the sorting operation."""
-    spark = create_spark_session()
+    spark = create_spark_session(app_name, master_node_url)    
     process_files(spark,input_path,output_path);
     spark.stop()
     logging.info("Spark job completed successfully.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Sort weather data based on composite keys.")
+    parser.add_argument("--master_node_url", default="local[*]", help="URL of the master node.")
+    parser.add_argument("--app_name", default="DataSorting", help="Name of the Spark application.")
     parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output2/", help="Input directory path.")
     parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output3/", help="Output directory path.")
     args = parser.parse_args()
-    main(args.input_filepath, args.output_filepath)
+    main(args.app_name,args.master_node_url,args.input_filepath, args.output_filepath)
