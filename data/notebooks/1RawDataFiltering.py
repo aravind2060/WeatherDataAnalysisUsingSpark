@@ -94,6 +94,6 @@ if __name__ == "__main__":
     parser.add_argument("--master_node_url", default="local[*]", help="URL of the master node.")
     parser.add_argument("--app_name", default="GHCN Step 1 Filtering only required data", help="Name of the Spark application.")
     parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/input/", help="Input directory path.")
-    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output/", help="Output directory path.")
+    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output1/", help="Output directory path.")
     args = parser.parse_args()
     main(args)
