@@ -3,7 +3,7 @@ import shutil
 import argparse
 import logging
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, trim, concat_ws
+from pyspark.sql.functions import col, trim, concat_ws, regexp_replace
 
 # Setup basic configuration for logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -11,7 +11,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def create_spark_session(app_name, master_node_url):
     """Initialize and return a Spark session with the specified application name and master URL."""
     logging.info("Creating Spark session with app name: %s and master URL: %s", app_name, master_node_url)
-
     return SparkSession.builder \
         .appName(app_name) \
         .master(master_node_url) \
@@ -39,6 +38,7 @@ def format_output(df):
     """Create a single string column by concatenating relevant fields, separated by commas."""
     logging.info("Formatting output.")
     formatted_df = df.withColumn("output", trim(concat_ws(",", col("stationID"), col("date"), col("element"), col("value"))))
+    formatted_df = formatted_df.withColumn("output", regexp_replace("output", "[^\x20-\x7E]", ""))
     return formatted_df.select("output")
 
 def save_output(df: DataFrame, output_path: str, output_file: str):
@@ -67,9 +67,6 @@ def save_output(df: DataFrame, output_path: str, output_file: str):
     
     # Clean up the temporary directory
     shutil.rmtree(temp_path)
-    
-    
-
 
 def process_files(spark, input_dir, output_filepath):
     """Process each file in the input directory and save it with the same name in the output directory."""
@@ -77,47 +74,26 @@ def process_files(spark, input_dir, output_filepath):
     files = [f for f in os.listdir(input_dir) if f.endswith('.csv')]
     for file in files:
         input_filepath = os.path.join(input_dir, file)
-        
         logging.info("Processing file: %s", file)
         
         # Read and process each file
         df = read_data(spark, input_filepath)
-        
-        logging.info("Finished Reading file into df : %s", file)
-        # Filter data to include only records from the US, Canada, or Mexico and specific climate elements.
         filtered_df = filter_and_transform(df)
-        
-        logging.info("Finished filtering file: %s", file)
-        
-        # Create a single string column by concatenating relevant fields, separated by commas.
         final_df = format_output(filtered_df)
         
-        logging.info("Finished formatting file: %s", file)
         # Save the processed data to the output directory with the same filename
-        save_output(final_df, output_filepath,file)
-        logging.info("Finished Saving new file in outputpath : %s", output_filepath);
-        
+        save_output(final_df, output_filepath, file)
 
 def main(args):
-    
-    spark = create_spark_session(args.app_name, args.master_node_url);
-    
-    process_files(spark,args.input_filepath,args.output_filepath);
-    
-    logging.info("No more files in inputpath: %s", args.input_filepath);
-    
-    stopSparkSession(spark);
+    spark = create_spark_session(args.app_name, args.master_node_url)
+    process_files(spark, args.input_filepath, args.output_filepath)
+    stopSparkSession(spark)
     
 if __name__ == "__main__":
-    
-    # if len(sys.argv) != 4:
-    #    print("Usage: python Filteringrawdata.py <master_node_url> <app_name> <input_file_path> <output_file_path>\n Ex: /spark/bin/spark-submit Filteringrawdata.py spark://spark-master:7077 /workspaces/WeatherDataAnalysisUsingSpark/data/input/ /workspaces/WeatherDataAnalysisUsingSpark/data/output")
-       
     parser = argparse.ArgumentParser(description="Process weather data.")
     parser.add_argument("--master_node_url", default="local[*]", help="URL of the master node.")
     parser.add_argument("--app_name", default="GHCN Step 1 Filtering only required data", help="Name of the Spark application.")
     parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/input/", help="Input directory path.")
     parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output/", help="Output directory path.")
-    
     args = parser.parse_args()
     main(args)
