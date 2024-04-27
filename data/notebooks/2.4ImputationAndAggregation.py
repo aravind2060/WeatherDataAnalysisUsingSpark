@@ -59,10 +59,11 @@ def impute_and_aggregate(df):
     )
 
     # Impute missing temperature data
-    pivot_df = pivot_df.withColumn("TMIN", when(col("TMIN").isNull() & col("TMAX").isNotNull() & col("TAVG").isNotNull(), 2 * col("TAVG") - col("TMAX")).otherwise(col("TMIN")))
-    pivot_df = pivot_df.withColumn("TMAX", when(col("TMAX").isNull() & col("TMIN").isNotNull() & col("TAVG").isNotNull(), 2 * col("TAVG") - col("TMIN")).otherwise(col("TMAX")))
-    pivot_df = pivot_df.withColumn("TAVG", when(col("TAVG").isNull() & col("TMIN").isNotNull() & col("TMAX").isNotNull(), (col("TMIN") + col("TMAX")) / 2).otherwise(col("TAVG")))
-
+    pivot_df = pivot_df.withColumn("TMIN", when(col("TMIN").isNull() & col("TMAX").isNotNull() & col("TAVG").isNotNull(), 2 * col("TAVG") - col("TMAX")).otherwise(coalesce(col("TMIN"), lit(0.0))))
+    pivot_df = pivot_df.withColumn("TMAX", when(col("TMAX").isNull() & col("TMIN").isNotNull() & col("TAVG").isNotNull(), 2 * col("TAVG") - col("TMIN")).otherwise(coalesce(col("TMAX"), lit(0.0))))
+    pivot_df = pivot_df.withColumn("TAVG", when(col("TAVG").isNull() & col("TMIN").isNotNull() & col("TMAX").isNotNull(), (col("TMIN") + col("TMAX")) / 2).otherwise(coalesce(col("TAVG"), lit(0.0))))
+    
+    pivot_df = pivot_df.withColumn("PRCP", coalesce(col("PRCP"), lit(0.0)))
     # Reorder columns to match the desired output
     pivot_df = pivot_df.select(
         "StationID",
