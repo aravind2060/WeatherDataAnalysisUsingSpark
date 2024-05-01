@@ -3,6 +3,7 @@ import argparse
 import os
 import shutil
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import *
 from pyspark.sql.functions import col, trim, upper, regexp_replace, when, substring, length, coalesce, lit,first,max,concat_ws,split,avg,collect_list,concat,last,mean, stddev, abs,to_date,sum as sql_sum,date_format
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 from pyspark.sql.window import Window
@@ -39,67 +40,24 @@ def clean_data(data):
         data = data.withColumn(column, regexp_replace(col(column), "[^\x20-\x7E]", ""))
     return data
 
-def filter_data_by_location_and_time(df, location, start_date, end_date):
-    """Filter data by geographic location and date range."""
-    logging.info("Filtering data by location and time.")
-    return df.filter(
-        (col('StationID') == location) &
-        (col('Date') >= start_date) &
-        (col('Date') <= end_date)
+def temperature_analysis(df):
+    """Perform temperature analysis by calculating average, minimum, and maximum temperatures."""
+    logging.info("Performing temperature analysis.")
+
+    # Convert 'Date' column to date format and extract month-year for grouping
+    df = df.withColumn("MonthYear", date_format(to_date(col("Date"), "yyyyMMdd"), "yyyy-MM"))
+
+    # Calculate average, minimum, and maximum temperatures for each country/state-month combination
+    temperature_df = df.groupBy("Country", "StateName", "MonthYear").agg(
+        avg("TMAX").alias("AvgMaxTemp"),
+        avg("TMIN").alias("AvgMinTemp"),
+        avg("TAVG").alias("AvgTemp"),
+        max("TMAX").alias("MaxTemp"),
+        min("TMIN").alias("MinTemp")
     )
 
-def aggregate_precipitation(df, time_unit):
-    """
-    Aggregate precipitation data based on the given time unit ('daily', 'monthly', 'yearly').
-    """
-    logging.info("Aggregating precipitation data by %s.", time_unit)
+    return temperature_df
 
-    if time_unit == 'monthly':
-        df = df.withColumn('Month', date_format(to_date('Date', 'yyyyMMdd'), 'yyyy-MM'))
-        group_col = 'Month'
-    elif time_unit == 'daily':
-        df = df.withColumn('Date', to_date('Date', 'yyyyMMdd'))
-        group_col = 'Date'
-    elif time_unit == 'yearly':
-        df = df.withColumn('Year', date_format(to_date('Date', 'yyyyMMdd'), 'yyyy'))
-        group_col = 'Year'
-    else:
-        raise ValueError("Unsupported time unit. Use 'daily', 'monthly', or 'yearly'.")
-
-    # Perform aggregation
-    aggregated_df = df.groupBy(group_col).agg(
-        sql_sum('PRCP').alias('TotalPrecipitation'),
-        avg('PRCP').alias('AveragePrecipitation')
-    )
-    return aggregated_df
-
-
-def identify_anomalies(df, threshold, time_unit):
-    """
-    Identify heavy rainfall or drought based on thresholds.
-    The `time_unit` parameter determines the column used for sorting.
-    """
-    logging.info("Identifying precipitation anomalies based on %s data.", time_unit)
-
-    # Determine the appropriate column for sorting based on the aggregation level
-    # sort_column = 'Date' if time_unit == 'daily' else time_unit.capitalize()
-    
-    if time_unit == 'daily':
-        sort_column = 'Date';
-    elif time_unit == 'monthly':
-        sort_column = 'Month';
-    elif time_unit == 'yearly':
-        sort_column = 'Year';
-
-    sorted_df = df.orderBy(sort_column)  # Sorting by the appropriate column
-
-    # Identifying anomalies where precipitation is above or below the specified thresholds
-    return sorted_df.withColumn(
-        'Anomaly',
-        when(col('TotalPrecipitation') >= threshold, 'Heavy Rainfall')
-        .when(col('TotalPrecipitation') < threshold, 'Drought')
-        .otherwise('Normal')
-    )
     
 
 def save_output(df, output_path, output_file,headerr=True):
@@ -132,16 +90,11 @@ def process_files(spark, input_dir, output_filepath,location,start_date,end_date
 
         df = load_data(spark, input_filepath, data_schema)
         df.show(5)
-        filtered_df = filter_data_by_location_and_time(df, location, start_date, end_date)
-        logging.info(f"Filtered by station id : {location}, start_date: {start_date} , end_date: {end_date} ");
-        filtered_df.show(5);
-        aggregated_df = aggregate_precipitation(filtered_df, time_unit);
-        logging.info(f"Aggregated Precipitation based on time_unit: {time_unit}");
-        aggregated_df.show(5);
-        anomalies_df = identify_anomalies(aggregated_df, threshold,time_unit);
-        logging.info(f"Identify Anomalies with threshold: {threshold}");
-        # anomalies_df.show(5);
-        save_output(anomalies_df, output_filepath, file)
+        temp_df = temperature_analysis(df)
+        logging.info("Temperature analysis completed.")
+        temp_df.show(5)
+        
+        save_output(temp_df, output_filepath, file)
 
 def main():
     """Main function to orchestrate the data processing using Spark."""
@@ -154,9 +107,9 @@ def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Process weather data.")
     parser.add_argument("--master_node_url", default="local[*]", help="URL of the master node.")
-    parser.add_argument("--app_name", default="Precipitation Analysis", help="Name of the Spark application.")
+    parser.add_argument("--app_name", default="Temperature Analysis", help="Name of the Spark application.")
     parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output8/", help="Input directory path.")
-    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output9/", help="Output directory path.")
+    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output10/", help="Output directory path.")
     parser.add_argument("--location",default="CA001015630", help="Geographic location (station ID).")
     parser.add_argument("--start_date",default="20240101" , help="Start date for the period of interest (yyyy-MM-dd).")
     parser.add_argument("--end_date",default="20240331" , help="End date for the period of interest (yyyy-MM-dd).")
