@@ -3,7 +3,7 @@ import argparse
 import os
 import shutil
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, trim, upper, regexp_replace, when, substring, length, coalesce, lit,first,max,concat_ws,split,avg,collect_list,concat,last,abs,expr,percentile_approx
+from pyspark.sql.functions import col, trim, upper, regexp_replace, when, substring, length, coalesce, lit,first,max,concat_ws,split,avg,collect_list,concat,last,mean, stddev, abs
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 from pyspark.sql.window import Window
 
@@ -39,44 +39,39 @@ def clean_data(data):
         data = data.withColumn(column, regexp_replace(col(column), "[^\x20-\x7E]", ""))
     return data
 
-def temperature_outliers(input_df):
+def precipitation_outliers(input_df):
     """
-    Identify and adjust temperature outliers using the Interquartile Range (IQR) method.
-    Outliers are defined as values that lie outside 1.5 * IQR below Q1 or above Q3.
-    Adjusted values will be set to the median of the surrounding days.
+    Identify and adjust precipitation outliers using the standard deviation method.
+    Outliers are defined as values that are more than 3 standard deviations from the mean.
+    Adjusted values will be set to the mean of non-outlier values.
     """
-    logging.info("Identifying and adjusting temperature outliers.")
+    logging.info("Identifying and adjusting precipitation outliers.")
 
-    # Define window specification for each StationID
-    window_spec = Window.partitionBy("StationID")
+    # Calculate mean and standard deviation of PRCP within each group
+    stats_df = input_df.groupBy("StationID", "Date").agg(
+        mean("PRCP").alias("mean_PRCP"),
+        stddev("PRCP").alias("stddev_PRCP")
+    )
 
-    # Calculate Q1, Q3, and IQR for TMIN, TMAX, and TAVG
-    for temp in ["TMIN", "TMAX", "TAVG"]:
-        input_df = input_df.withColumn(f"{temp}_Q1", percentile_approx(col(temp), 0.25).over(window_spec))
-        input_df = input_df.withColumn(f"{temp}_Q3", percentile_approx(col(temp), 0.75).over(window_spec))
-        input_df = input_df.withColumn(f"{temp}_IQR", col(f"{temp}_Q3") - col(f"{temp}_Q1"))
+    # Join back to original data to access these statistics
+    adjusted_df = input_df.join(stats_df, ["StationID", "Date"])
 
-        # Define lower and upper bounds for outliers
-        input_df = input_df.withColumn(f"{temp}_LowerBound", col(f"{temp}_Q1") - 1.5 * col(f"{temp}_IQR"))
-        input_df = input_df.withColumn(f"{temp}_UpperBound", col(f"{temp}_Q3") + 1.5 * col(f"{temp}_IQR"))
+    # Define outliers as values more than 3 standard deviations from the mean
+    adjusted_df = adjusted_df.withColumn(
+        "PRCP",
+        when(
+            abs(col("PRCP") - col("mean_PRCP")) > 3 * col("stddev_PRCP"),
+            col("mean_PRCP")
+        ).otherwise(col("PRCP"))
+    )
 
-        # Replace outliers with the median of temperatures in the window
-        median_window = Window.partitionBy("StationID").orderBy("Date").rowsBetween(-3, 3)
-        input_df = input_df.withColumn(f"{temp}_Median", percentile_approx(col(temp), 0.5).over(median_window))
+    # Drop temporary columns and return the cleaned DataFrame
+    adjusted_df = adjusted_df.drop("mean_PRCP", "stddev_PRCP")
 
-        # Apply adjustments for outliers
-        input_df = input_df.withColumn(
-            temp,
-            when(
-                (col(temp) < col(f"{temp}_LowerBound")) | (col(temp) > col(f"{temp}_UpperBound")),
-                col(f"{temp}_Median")
-            ).otherwise(col(temp))
-        )
+    return adjusted_df
 
-        # Clean up columns
-        input_df = input_df.drop(f"{temp}_Q1", f"{temp}_Q3", f"{temp}_IQR", f"{temp}_LowerBound", f"{temp}_UpperBound", f"{temp}_Median")
 
-    return input_df
+
 
 def save_output(df, output_path, output_file):
     """Save the augmented data to the specified path as a single CSV file without quotes."""
@@ -107,7 +102,7 @@ def process_files(spark, input_dir, output_filepath):
 
         df = load_data(spark, input_filepath, data_schema)
         df.show(5)
-        dff = temperature_outliers(df);
+        dff = precipitation_outliers(df);
         save_output(dff, output_filepath, file)
 
 def main():
@@ -121,9 +116,9 @@ def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Process weather data.")
     parser.add_argument("--master_node_url", default="local[*]", help="URL of the master node.")
-    parser.add_argument("--app_name", default="Temperature Outliers", help="Name of the Spark application.")
-    parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output5/", help="Input directory path.")
-    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output6/", help="Output directory path.")
+    parser.add_argument("--app_name", default="Precipitation Outliers", help="Name of the Spark application.")
+    parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output7/", help="Input directory path.")
+    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output8/", help="Output directory path.")
     return parser.parse_args()
 
 if __name__ == "__main__":

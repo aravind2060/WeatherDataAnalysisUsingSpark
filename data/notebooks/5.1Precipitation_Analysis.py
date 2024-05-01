@@ -3,7 +3,7 @@ import argparse
 import os
 import shutil
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, trim, upper, regexp_replace, when, substring, length, coalesce, lit,first,max,concat_ws,split,avg,collect_list,concat,last,mean, stddev, abs
+from pyspark.sql.functions import col, trim, upper, regexp_replace, when, substring, length, coalesce, lit,first,max,concat_ws,split,avg,collect_list,concat,last,mean, stddev, abs,to_date,sum as sql_sum
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 from pyspark.sql.window import Window
 
@@ -39,37 +39,39 @@ def clean_data(data):
         data = data.withColumn(column, regexp_replace(col(column), "[^\x20-\x7E]", ""))
     return data
 
-def precipitation_outliers(input_df):
-    """
-    Identify and adjust precipitation outliers using the standard deviation method.
-    Outliers are defined as values that are more than 3 standard deviations from the mean.
-    Adjusted values will be set to the mean of non-outlier values.
-    """
-    logging.info("Identifying and adjusting precipitation outliers.")
-
-    # Calculate mean and standard deviation of PRCP within each group
-    stats_df = input_df.groupBy("StationID", "Date").agg(
-        mean("PRCP").alias("mean_PRCP"),
-        stddev("PRCP").alias("stddev_PRCP")
+def filter_data_by_location_and_time(df, location, start_date, end_date):
+    """Filter data by geographic location and date range."""
+    logging.info("Filtering data by location and time.")
+    return df.filter(
+        (col('StationID') == location) &
+        (col('Date') >= start_date) &
+        (col('Date') <= end_date)
     )
 
-    # Join back to original data to access these statistics
-    adjusted_df = input_df.join(stats_df, ["StationID", "Date"])
+def aggregate_precipitation(df, time_unit):
+    """Aggregate precipitation data based on the specified time unit."""
+    logging.info(f"Aggregating precipitation data by {time_unit}.")
+    if time_unit == 'monthly':
+        df = df.withColumn('Month', to_date(col('Date'), 'yyyyMM'))
+    elif time_unit == 'yearly':
+        df = df.withColumn('Year', to_date(col('Date'), 'yyyy'))
+    else:
+        df = df.withColumn('Date', to_date(col('Date'), 'yyyyMMdd'))
 
-    # Define outliers as values more than 3 standard deviations from the mean
-    adjusted_df = adjusted_df.withColumn(
-        "PRCP",
-        when(
-            abs(col("PRCP") - col("mean_PRCP")) > 3 * col("stddev_PRCP"),
-            col("mean_PRCP")
-        ).otherwise(col("PRCP"))
+    return df.groupBy(time_unit.capitalize()).agg(sql_sum('PRCP').alias('TotalPrecipitation'))
+
+def identify_anomalies(df, threshold):
+    """Identify heavy rainfall or drought based on thresholds."""
+    logging.info("Identifying precipitation anomalies.")
+    return df.withColumn(
+        'Anomaly',
+        when(col('TotalPrecipitation') >= threshold, 'Heavy Rainfall').otherwise(
+            when(col('TotalPrecipitation') <= threshold, 'Drought').otherwise('Normal'))
     )
-
-    # Drop temporary columns and return the cleaned DataFrame
-    adjusted_df = adjusted_df.drop("mean_PRCP", "stddev_PRCP")
-
-    return adjusted_df
-
+    
+    
+    
+    
 
 
 
@@ -92,7 +94,7 @@ def save_output(df, output_path, output_file):
     shutil.rmtree(temp_path)
     logging.info(f"Output successfully saved to: {full_path}")
 
-def process_files(spark, input_dir, output_filepath):
+def process_files(spark, input_dir, output_filepath,location,start_date,end_date,time_unit,threshold):
     """Process each file in the input directory and save it with the same name in the output directory."""
     files = [f for f in os.listdir(input_dir) if f.endswith('.csv')]
     for file in files:
@@ -102,14 +104,16 @@ def process_files(spark, input_dir, output_filepath):
 
         df = load_data(spark, input_filepath, data_schema)
         df.show(5)
-        dff = precipitation_outliers(df);
-        save_output(dff, output_filepath, file)
+        filtered_df = filter_data_by_location_and_time(df, location, start_date, end_date)
+        aggregated_df = aggregate_precipitation(filtered_df, time_unit)
+        anomalies_df = identify_anomalies(aggregated_df, threshold)
+        save_output(anomalies_df, output_filepath, file)
 
 def main():
     """Main function to orchestrate the data processing using Spark."""
     args = parse_arguments()
     spark = create_spark_session(args.app_name, args.master_node_url)
-    process_files(spark, args.input_filepath, args.output_filepath)
+    process_files(spark, args.input_filepath, args.output_filepath,args.location,args.start_date,args.end_date,args.time_unit,args.threshold);
     stopSparkSession(spark)
 
 def parse_arguments():
@@ -117,8 +121,13 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Process weather data.")
     parser.add_argument("--master_node_url", default="local[*]", help="URL of the master node.")
     parser.add_argument("--app_name", default="Precipitation Outliers", help="Name of the Spark application.")
-    parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output6/", help="Input directory path.")
-    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output7/", help="Output directory path.")
+    parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output8/", help="Input directory path.")
+    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output9/", help="Output directory path.")
+    parser.add_argument("--location",default="US1UTDV0041", help="Geographic location (station ID).")
+    parser.add_argument("--start_date",default="20240101" , help="Start date for the period of interest (yyyy-MM-dd).")
+    parser.add_argument("--end_date",default="20240131" , help="End date for the period of interest (yyyy-MM-dd).")
+    parser.add_argument("--time_unit", choices=['daily', 'monthly', 'yearly'], default='daily', help="Time unit for aggregation.")
+    parser.add_argument("--threshold",default=100 ,type=float, help="Threshold value for detecting rainfall anomalies.")
     return parser.parse_args()
 
 if __name__ == "__main__":
