@@ -110,6 +110,7 @@ def save_output(df, output_path, output_file,headerr=True):
 def process_files(spark, input_dir, output_filepath):
     """Process each file in the input directory and save it with the same name in the output directory."""
     files = [f for f in os.listdir(input_dir) if f.endswith('.csv')]
+    parent_df = [];
     for file in files:
         logging.info(f"Processing file: {file}")
         input_filepath = os.path.join(input_dir, file)
@@ -117,12 +118,20 @@ def process_files(spark, input_dir, output_filepath):
         data_schema = "Country STRING,StateName STRING,MonthYear STRING,AvgMaxTemp Double,AvgMinTemp Double,AvgTemp Double,MaxTemp Double,MinTemp Double"
 
         df = load_data(spark, input_filepath, data_schema)
+        logging.info(f"Successfully loaded file: {file} into data frame");
         df.show(5)
-        temp_df = identify_long_term_trends(spark,df,"AverageTemperature");
-        if temp_df is not None:
-            logging.info("Temperature analysis completed.")
-            temp_df.show(5)
-            save_output(temp_df, output_filepath, file)
+        
+        parent_df.append(df);
+
+    # Merge all DataFrames into a single DataFrame
+    merged_df = parent_df[0]
+    for df in parent_df[1:]:
+        merged_df = merged_df.union(df)
+    temp_df = identify_long_term_trends(spark,merged_df,"AverageTemperature");
+    if temp_df is not None:
+        logging.info("Temperature analysis completed.")
+        temp_df.show(5)
+        save_output(temp_df, output_filepath, file)
 
 def main():
     """Main function to orchestrate the data processing using Spark."""
