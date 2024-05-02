@@ -40,25 +40,32 @@ def clean_data(data):
         data = data.withColumn(column, regexp_replace(col(column), "[^\x20-\x7E]", ""))
     return data
 
-def temperature_analysis(df):
-    """Perform temperature analysis by calculating average, minimum, and maximum temperatures."""
-    logging.info("Performing temperature analysis.")
-
-    # Convert 'Date' column to date format and extract month-year for grouping
-    df = df.withColumn("MonthYear", date_format(to_date(col("Date"), "yyyyMMdd"), "yyyy-MM"))
-
-    # Calculate average, minimum, and maximum temperatures for each country/state-month combination
-    temperature_df = df.groupBy("Country", "StateName", "MonthYear").agg(
-        avg("TMAX").alias("AvgMaxTemp"),
-        avg("TMIN").alias("AvgMinTemp"),
-        avg("TAVG").alias("AvgTemp"),
-        max("TMAX").alias("MaxTemp"),
-        min("TMIN").alias("MinTemp")
-    )
-
-    return temperature_df
-
+def precipitation_analysis_trends(df):
+    """
+    Aggregate monthly precipitation values for each state and analyze patterns.
     
+    Args:
+    df (DataFrame): Input Spark DataFrame containing weather data with precipitation values.
+    
+    Returns:
+    DataFrame: Aggregated DataFrame with monthly precipitation sums per state.
+    """
+    logging.info("Aggregating monthly precipitation values for each state.")
+
+    # Convert 'Date' from string to date format, assuming 'Date' is in 'yyyyMMdd' format
+    df = df.withColumn("Date", to_date(col("Date"), "yyyyMMdd"))
+
+    # Extract month and year from 'Date' for monthly aggregation
+    df = df.withColumn("YearMonth", date_format(col("Date"), "yyyyMM"))
+
+    # Group by 'StateName' and 'YearMonth', and sum precipitation
+    aggregated_df = df.groupBy("Country","StateName", "YearMonth").agg(
+        sql_sum("PRCP").alias("TotalPrecipitation"),
+        avg("PRCP").alias("AveragePrecipitation")
+    ).orderBy("StateName", "YearMonth")
+    
+    
+    return aggregated_df    
 
 def save_output(df, output_path, output_file,headerr=True):
     """Save the augmented data to the specified path as a single CSV file without quotes."""
@@ -79,7 +86,7 @@ def save_output(df, output_path, output_file,headerr=True):
     shutil.rmtree(temp_path)
     logging.info(f"Output successfully saved to: {full_path}")
 
-def process_files(spark, input_dir, output_filepath,location,start_date,end_date,time_unit,threshold):
+def process_files(spark, input_dir, output_filepath):
     """Process each file in the input directory and save it with the same name in the output directory."""
     files = [f for f in os.listdir(input_dir) if f.endswith('.csv')]
     for file in files:
@@ -89,32 +96,26 @@ def process_files(spark, input_dir, output_filepath,location,start_date,end_date
         data_schema = "StationID STRING, Date STRING, TMIN Float, TMAX Float,TAVG Float,PRCP Float, StateName STRING, LocationName STRING,Country STRING"
 
         df = load_data(spark, input_filepath, data_schema)
+        logging.info(f"Loaded data successfully!");
         df.show(5)
-        temp_df = temperature_analysis(df)
-        logging.info("Temperature analysis completed.")
-        temp_df.show(5)
-        
-        save_output(temp_df, output_filepath, file)
+        precp_df = precipitation_analysis_trends(df);
+        logging.info(f"Precipitation Analysis Trends");
+        save_output(precp_df, output_filepath, file)
 
 def main():
     """Main function to orchestrate the data processing using Spark."""
     args = parse_arguments()
     spark = create_spark_session(args.app_name, args.master_node_url)
-    process_files(spark, args.input_filepath, args.output_filepath,args.location,args.start_date,args.end_date,args.time_unit,args.threshold);
+    process_files(spark, args.input_filepath, args.output_filepath);
     stopSparkSession(spark)
 
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Process weather data.")
     parser.add_argument("--master_node_url", default="local[*]", help="URL of the master node.")
-    parser.add_argument("--app_name", default="Temperature Analysis", help="Name of the Spark application.")
+    parser.add_argument("--app_name", default="Precipitation Analysis Trends", help="Name of the Spark application.")
     parser.add_argument("--input_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output8/", help="Input directory path.")
-    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output10/", help="Output directory path.")
-    parser.add_argument("--location",default="CA001015630", help="Geographic location (station ID).")
-    parser.add_argument("--start_date",default="20240101" , help="Start date for the period of interest (yyyy-MM-dd).")
-    parser.add_argument("--end_date",default="20240331" , help="End date for the period of interest (yyyy-MM-dd).")
-    parser.add_argument("--time_unit", choices=['daily', 'monthly', 'yearly'], default='monthly', help="Time unit for aggregation.")
-    parser.add_argument("--threshold",default=100 ,type=float, help="Threshold value for detecting rainfall anomalies.")
+    parser.add_argument("--output_filepath", default="/workspaces/WeatherDataAnalysisUsingSpark/data/output11/", help="Output directory path.")
     return parser.parse_args()
 
 if __name__ == "__main__":
