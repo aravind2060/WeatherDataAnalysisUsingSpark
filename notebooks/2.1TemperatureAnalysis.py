@@ -80,41 +80,41 @@ def aggregate_temperature(df, time_unit):
     
     return sorted_df
 
-# def compare_temperatures(location1_df, location2_df, time_unit):
-#     """
-#     Compare temperatures between two locations and calculate the differences.
-#     """
-#     logging.info("Comparing temperatures between two locations.")
+def compare_temperatures(location1_df, location2_df, time_unit):
+    """
+    Compare temperatures between two locations and calculate the differences,
+    filling missing temperature values with zero.
+    """
+    logging.info("Comparing temperatures between two locations.")
 
-#     if time_unit == 'monthly':
-#         location1_df = location1_df.withColumn('Month', date_format(to_date('Date', 'yyyyMMdd'), 'yyyy-MM'))
-#         location2_df = location2_df.withColumn('Month', date_format(to_date('Date', 'yyyyMMdd'), 'yyyy-MM'))
-#         join_col = 'Month'
-#     elif time_unit == 'daily':
-#         location1_df = location1_df.withColumn('Date', to_date('Date', 'yyyyMMdd'))
-#         location2_df = location2_df.withColumn('Date', to_date('Date', 'yyyyMMdd'))
-#         join_col = 'Date'
-#     elif time_unit == 'yearly':
-#         location1_df = location1_df.withColumn('Year', date_format(to_date('Date', 'yyyyMMdd'), 'yyyy'))
-#         location2_df = location2_df.withColumn('Year', date_format(to_date('Date', 'yyyyMMdd'), 'yyyy'))
-#         join_col = 'Year'
-#     else:
-#         raise ValueError("Unsupported time unit. Use 'daily', 'monthly', or 'yearly'.")
+    # Identify the correct column for joining based on time_unit
+    if time_unit == 'monthly':
+        join_col = 'Month'
+    elif time_unit == 'daily':
+        join_col = 'Date'
+    elif time_unit == 'yearly':
+        join_col = 'Year'
+    else:
+        raise ValueError("Unsupported time unit. Use 'daily', 'monthly', or 'yearly'.")
 
-#     # Join the two DataFrames and calculate the temperature differences
-#     comparison_df = location1_df.join(location2_df, on=join_col, how="outer") \
-#         .select(join_col,
-#                 col("TMINAVG").alias("Location1_TMINAVG"),
-#                 col("TMINAVG").alias("Location2_TMINAVG"),
-#                 col("TMAXAVG").alias("Location1_TMAXAVG"),
-#                 col("TMAXAVG").alias("Location2_TMAXAVG"),
-#                 col("TAvgAvg").alias("Location1_TAvgAvg"),
-#                 col("TAvgAvg").alias("Location2_TAvgAvg")) \
-#         .withColumn("TMINAVG_Diff", col("Location1_TMINAVG") - col("Location2_TMINAVG")) \
-#         .withColumn("TMAXAVG_Diff", col("Location1_TMAXAVG") - col("Location2_TMAXAVG")) \
-#         .withColumn("TAvgAvg_Diff", col("Location1_TAvgAvg") - col("Location2_TAvgAvg"))
+    # Join the two DataFrames and calculate the temperature differences
+    comparison_df = location1_df.join(location2_df, on=join_col, how="full_outer") \
+        .select(
+            join_col,
+            coalesce(location1_df["TMINAVG"], lit(0)).alias("Location1_TMINAVG"),
+            coalesce(location2_df["TMINAVG"], lit(0)).alias("Location2_TMINAVG"),
+            coalesce(location1_df["TMAXAVG"], lit(0)).alias("Location1_TMAXAVG"),
+            coalesce(location2_df["TMAXAVG"], lit(0)).alias("Location2_TMAXAVG"),
+            coalesce(location1_df["TAvgAvg"], lit(0)).alias("Location1_TAvgAvg"),
+            coalesce(location2_df["TAvgAvg"], lit(0)).alias("Location2_TAvgAvg")
+        ) \
+        .withColumn("TMINAVG_Diff", col("Location1_TMINAVG") - col("Location2_TMINAVG")) \
+        .withColumn("TMAXAVG_Diff", col("Location1_TMAXAVG") - col("Location2_TMAXAVG")) \
+        .withColumn("TAvgAvg_Diff", col("Location1_TAvgAvg") - col("Location2_TAvgAvg"))
 
-#     return comparison_df
+    return comparison_df
+
+
 
 def save_output(df, output_path, output_file,headerr=True):
     """Save the augmented data to the specified path as a single CSV file without quotes."""
@@ -169,8 +169,14 @@ def process_files(spark, input_dir, output_filepath,stationId1,stateName1,statio
     aggregated_df2 = aggregate_temperature(filtered_df2, time_unit);
     logging.info(f"Aggregated Temperature based on time_unit: {time_unit}");
     aggregated_df2.show(5);
-    # compare_df = compare_temperatures(parent_df[0],parent_df[1],time_unit);  
-    save_output(aggregated_df1.union(aggregated_df2), output_filepath, file)
+    
+    logging.info(f"Finished Analysis of both ");
+    save_output(aggregated_df1.union(aggregated_df2), output_filepath, file);
+    
+    logging.info(f"Data Comparing among two stations is started: ");
+    compare_df = compare_temperatures(aggregated_df1,aggregated_df2,time_unit);  
+    
+    save_output(compare_df, output_filepath, "comparsion.csv")
 
 def main():
     """Main function to orchestrate the data processing using Spark."""
