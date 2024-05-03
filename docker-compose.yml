@@ -14,7 +14,8 @@ services:
       - "7077:7077"  # Spark Master communication port for Spark workers
       - "4040:4040"  # For Spark context viewing DAG
     volumes:
-      - ./data:/data  # Shared data volume for the cluster
+      - /workspaces/WeatherDataAnalysisUsingSpark/data/:/workspaces/WeatherDataAnalysisUsingSpark/data/  # Shared data volume for the cluster
+      - /workspaces/WeatherDataAnalysisUsingSpark/notebooks/:/workspaces/WeatherDataAnalysisUsingSpark/notebooks/
     restart: unless-stopped
 
   spark-worker1:
@@ -28,7 +29,8 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - ./data:/data  # Ensure same mount point as master
+      - /workspaces/WeatherDataAnalysisUsingSpark/data/:/workspaces/WeatherDataAnalysisUsingSpark/data/  # Ensure same mount point as master
+      - /workspaces/WeatherDataAnalysisUsingSpark/notebooks/:/workspaces/WeatherDataAnalysisUsingSpark/notebooks/
     depends_on:
       - spark-master
     restart: unless-stopped
@@ -44,7 +46,8 @@ services:
     ports:
       - "8082:8081"
     volumes:
-      - ./data:/data  # Ensure same mount point as master
+      - /workspaces/WeatherDataAnalysisUsingSpark/data/:/workspaces/WeatherDataAnalysisUsingSpark/data/  # Ensure same mount point as master
+      - /workspaces/WeatherDataAnalysisUsingSpark/notebooks/:/workspaces/WeatherDataAnalysisUsingSpark/notebooks/
     depends_on:
       - spark-master
     restart: unless-stopped
@@ -60,24 +63,26 @@ services:
     ports:
       - "8083:8081"
     volumes:
-      - ./data:/data  # Ensure same mount point as master
+      - /workspaces/WeatherDataAnalysisUsingSpark/data/:/workspaces/WeatherDataAnalysisUsingSpark/data/  # Ensure same mount point as master
+      - /workspaces/WeatherDataAnalysisUsingSpark/notebooks/:/workspaces/WeatherDataAnalysisUsingSpark/notebooks/
     depends_on:
       - spark-master
     restart: unless-stopped
 
-  zeppelin:
-    image: apache/zeppelin:0.9.0
-    container_name: zeppelin
-    ports:
-      - "8890:8080"
-    environment:
-      - ZEPPELIN_LOG_DIR=/logs
-      - ZEPPELIN_NOTEBOOK_DIR=/notebook
-    volumes:
-      - ./data:/data  # Separate volume for Zeppelin
-    depends_on:
-      - spark-master
-    restart: unless-stopped
+  # zeppelin:
+  #   image: apache/zeppelin:0.9.0
+  #   container_name: zeppelin
+  #   ports:
+  #     - "8890:8080"
+  #   environment:
+  #     - ZEPPELIN_LOG_DIR=/logs
+  #     - ZEPPELIN_NOTEBOOK_DIR=/notebook
+  #   volumes:
+  #     - ./data:/data  # Separate volume for Zeppelin
+  #     - ./notebooks:/notebooks
+  #   depends_on:
+  #     - spark-master
+  #   restart: unless-stopped
 
 volumes:
   data:
